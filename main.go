@@ -8,15 +8,18 @@ import (
 	"log"
 	"net"
 	"os"
+	"strconv"
 	"time"
 
 	GroupThree "github.com/LiZi-77/PCPP-Assignment4/grpc"
 	"google.golang.org/grpc"
 )
 
-var port = flag.Int("port", 5000, "port") //port for the node default 5000
+// var port = flag.Int("port", 8000, "port") //port for the node default 8000
 
-type STATE int32 //state struct to see wether the node has access, wants access or not.
+const INITPORT int32 = 8000
+
+type STATE int32 //state of the node
 
 const (
 	RELEASED STATE = iota
@@ -24,7 +27,6 @@ const (
 	REQUESTED
 )
 
-// node struct.
 type node struct {
 	GroupThree.UnimplementedGroup3Server
 	requests int
@@ -33,6 +35,125 @@ type node struct {
 	ctx      context.Context
 	queue    []int32
 	state    STATE
+}
+
+func main() {
+	arg1, _ := strconv.ParseInt(os.Args[1], 10, 32)
+	var port = int32(arg1) + INITPORT
+
+	logfile, err := os.OpenFile("log.server", os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
+
+	if err != nil {
+		log.Fatalf("failed opening file: %s", err)
+	}
+	defer logfile.Close()
+	log.SetOutput(logfile)
+
+	flag.Parse() //parse the flags
+
+	ctx_, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	//create a new node
+	_n := &node{
+		id:       port,
+		clients:  make(map[int32]GroupThree.Group3Client),
+		queue:    make([]int32, 0),
+		ctx:      ctx_,
+		state:    RELEASED,
+		requests: 0,
+	}
+
+	list, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	if err != nil {
+		log.Fatalf("failed to listen: %v", err)
+	}
+	log.Printf("Listening on port: %v\n", port)
+	fmt.Println("Listening on port: ", port)
+
+	// Create a new gRPC server
+	_s := grpc.NewServer()
+	GroupThree.RegisterGroup3Server(_s, _n)
+
+	go func() {
+		if err := _s.Serve(list); err != nil {
+			log.Fatalf("failed to server %v\n", err)
+		}
+	}()
+
+	//connect to all other nodes
+	for i := 0; i < 3; i++ {
+		nPort := int32(i) + INITPORT
+
+		if nPort == _n.id {
+			continue
+		}
+
+		var conn *grpc.ClientConn
+
+		log.Printf("Dialing %v\n", nPort)
+		fmt.Println("Dialing ", nPort)
+
+		conn, err := grpc.Dial(fmt.Sprintf(":%v", nPort), grpc.WithInsecure(), grpc.WithBlock())
+		if err != nil {
+			log.Fatalf("Dial failed %v\n", err)
+		}
+
+		defer conn.Close()
+		log.Printf("Succes connecting to: %v\n", nPort)
+		fmt.Println("Succes connecting to: ", nPort)
+
+		//create a new client
+		_c := GroupThree.NewGroup3Client(conn)
+		_n.clients[nPort] = _c
+	}
+
+	log.Printf("%v is connected to %v other nodes\n", _n.id, len(_n.clients))
+	fmt.Printf("%v is connected to %v other nodes\n", _n.id, len(_n.clients))
+
+	// wait for user input
+	scanner := bufio.NewScanner(os.Stdin)
+
+	for scanner.Scan() {
+		if scanner.Text() == "request" {
+			if _n.state == RELEASED {
+				_n.state = REQUESTED
+				_n.requests++
+				log.Printf("Node %v is requesting the token\n", _n.id)
+				fmt.Printf("Node %v is requesting the token\n", _n.id)
+
+				for _, client := range _n.clients {
+					go func(client GroupThree.Group3Client) {
+						_, err := client.RequestToken(_n.ctx, &GroupThree.RequestTokenRequest{
+							Id: _n.id,
+						})
+						if err != nil {
+							log.Printf("Error requesting token: %v\n", err)
+						}
+					}(client)
+				}
+			} else {
+				log.Printf("Node %v is already holding the token\n", _n.id)
+				fmt.Printf("Node %v is already holding the token\n", _n.id)
+			}
+		} else if scanner.Text() == "release" {
+			if _n.state == HELD {
+				_n.state = RELEASED
+				log.Printf("Node %v is releasing the token\n", _n.id)
+				fmt.Printf("Node %v is releasing the token\n", _n.id)
+				_n.ReplyQueue()
+			} else {
+				log.Printf("Node %v is not holding the token\n", _n.id)
+				fmt.Printf("Node %v is not holding the token\n", _n.id)
+			}
+		} else {
+			log.Printf("Invalid command: %v\n", scanner.Text())
+			fmt.Printf("Invalid command: %v\n", scanner.Text())
+		}
+	}
+	// log.Printf("%v is requesting access to critical service...\n", _n.id)
+	// fmt.Println("Requesting acccess to the critical service")
+	// _n.sendRequestToAll()
 }
 
 // request function to request access to the critical service
@@ -125,83 +246,4 @@ func (n *node) ReplyQueue() {
 		}
 	}
 	n.queue = make([]int32, 0)
-}
-
-func main() {
-	f, err := os.OpenFile("log.server", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
-	if err != nil {
-		log.Fatalf("error opening file: %v\n", err)
-	}
-	defer f.Close()
-	log.SetOutput(f)
-
-	flag.Parse() //set port with -port in the commandline when running the program
-
-	ctx_, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	var port = int32(*port)
-
-	//create a node for this proccess
-	n := &node{
-		id:       port,
-		clients:  make(map[int32]GroupThree.Group3Client),
-		queue:    make([]int32, 0),
-		ctx:      ctx_,
-		state:    RELEASED,
-		requests: 0,
-	}
-
-	//creates listener on port
-	list, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
-	if err != nil {
-		log.Fatalf("Failed to listen on port: %v\n", err)
-	}
-
-	log.Printf("Node created on port: %d\n", n.id)
-	fmt.Printf("Node created on port %v\n", n.id)
-
-	grpcServer := grpc.NewServer()
-	GroupThree.RegisterRingServer(grpcServer, n)
-
-	//serve on the listener
-	go func() {
-		if err := grpcServer.Serve(list); err != nil {
-			log.Fatalf("failed to server %v\n", err)
-		}
-	}()
-
-	//for loop to dial all other nodes in the network, if this loop is increased the number of nodes in the network is aswell
-	for i := 0; i < 3; i++ {
-		nodePort := int32(5000 + i)
-
-		if nodePort == n.id {
-			continue
-		}
-
-		var conn *grpc.ClientConn
-		log.Printf("Trying to dial: %v\n", nodePort)
-		conn, err := grpc.Dial(fmt.Sprintf(":%v", nodePort), grpc.WithInsecure(), grpc.WithBlock())
-
-		if err != nil {
-			log.Fatalf("Could not connect: %v\n", err)
-		}
-
-		defer conn.Close()
-		log.Printf("Succes connecting to: %v\n", nodePort)
-		c := GroupThree.NewRingClient(conn)
-		n.clients[nodePort] = c
-	}
-
-	log.Printf("%v is connected to %v other nodes\n", n.id, len(n.clients))
-	fmt.Printf("%v is connected to %v other nodes\n", n.id, len(n.clients))
-
-	scanner := bufio.NewScanner(os.Stdin)
-
-	//scanner that requests access from the given node when something is written in the terminal.
-	for scanner.Scan() {
-		log.Printf("%v is requesting access to critical service...\n", n.id)
-		fmt.Println("Requesting acccess to the critical service")
-		n.sendRequestToAll()
-	}
 }
