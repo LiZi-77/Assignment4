@@ -16,8 +16,6 @@ import (
 	"google.golang.org/grpc"
 )
 
-// var port = flag.Int("port", 8000, "port") //port for the node default 8000
-
 const INITPORT int32 = 8000
 
 type STATE int32 //state of the node
@@ -84,7 +82,7 @@ func main() {
 	}()
 
 	//connect to all other nodes
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 4; i++ {
 		nPort := int32(i) + INITPORT
 
 		if nPort == _n.id {
@@ -147,23 +145,23 @@ func main() {
 }
 
 // request function to request access to the critical service
-func (n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThree.Ack, error) {
-	log.Printf("%v recieved a request from %v.\n", n.id, req.Id)
+func (_n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThree.Ack, error) {
+	log.Printf("%v recieved a request from %v.\n", _n.id, req.Id)
 	fmt.Println("Recieved a request")
 
 	//checks if state is higher, if equal check id. (This is the hierarchy)
-	if n.state == HELD || (n.state == REQUESTED && (n.id > req.Id)) {
-		log.Printf("%v is queueing a request from %v\n", n.id, req.Id)
+	if _n.state == HELD || (n.state == REQUESTED && (_n.id > req.Id)) {
+		log.Printf("%v is queueing a request from %v\n", _n.id, req.Id)
 		fmt.Println("Queueing request")
-		n.queue = append(n.queue, req.Id)
+		_n.queue = append(n.queue, req.Id)
 	} else {
-		if n.state == REQUESTED {
-			n.requests++
-			n.clients[req.Id].Request(ctx, &GroupThree.Request{Id: n.id})
+		if _n.state == REQUESTED {
+			_n.requests++
+			_n.clients[req.Id].Request(ctx, &GroupThree.Request{Id: _n.id})
 		}
-		log.Printf("%v is sending a reply to %v\n", n.id, req.Id)
+		log.Printf("%v is sending a reply to %v\n", _n.id, req.Id)
 		fmt.Println("Sending reply")
-		n.clients[req.Id].Reply(ctx, &GroupThree.Reply{})
+		_n.clients[req.Id].Reply(ctx, &GroupThree.Reply{})
 	}
 	reply := &GroupThree.Ack{}
 	return reply, nil

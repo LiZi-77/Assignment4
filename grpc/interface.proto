@@ -2,22 +2,27 @@ syntax = "proto3";
 
 package proto;
 
-option go_package = "/proto";
+option go_package = "/grpc";
 
-service DistributedMutualExclusion
+service GroupThree
 {
-    rpc Request(RequestMsg) returns (Info);
-    rpc Reply(RequestMsg) returns (Info);
+    rpc Request(Request) returns (Ack) {};
+    rpc Reply(Reques) returns (AckReply) {};
 }
 
-message RequestMsg {
-    int32 id = 1;
-    uint64 cnt = 2;
-}
-
-message ReplyMsg {
+message Request {
     int32 id = 1;
 }
 
+message Reply {
+    int32 id = 1;
+}
 
-message Info{}
+
+message Ack {
+    int32 id = 1;
+}
+
+message AckReply {
+    int32 id = 1;
+}
