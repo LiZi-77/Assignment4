@@ -138,16 +138,6 @@ func main() {
 				log.Printf("Node %v is already holding the token\n", _n.id)
 				fmt.Printf("Node %v is already holding the token\n", _n.id)
 			}
-		} else if scanner.Text() == "release" {
-			if _n.state == HELD {
-				_n.state = RELEASED
-				log.Printf("Node %v is releasing the token\n", _n.id)
-				fmt.Printf("Node %v is releasing the token\n", _n.id)
-				_n.ReplyQueue()
-			} else {
-				log.Printf("Node %v is not holding the token\n", _n.id)
-				fmt.Printf("Node %v is not holding the token\n", _n.id)
-			}
 		} else {
 			log.Printf("Invalid command: %v\n", scanner.Text())
 			fmt.Printf("Invalid command: %v\n", scanner.Text())
@@ -179,7 +169,7 @@ func (n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThre
 	return reply, nil
 }
 
-// reply function to check wether all nodes have replied to the request.
+// reply function to reply to a request
 func (_n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.AckReply, error) {
 
 	_n.mutex.Lock()
@@ -199,54 +189,34 @@ func (_n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.A
 	return reply, nil
 }
 
-// critical service emulated in this method. takes 5 seconds to exec
-func (n *node) CriticalService() {
-	log.Printf("Critical service accessed by %v\n", n.id)
+// critical function to simulate a critical service
+func (_n *node) CriticalService() {
+	log.Printf("%v is in the critical service\n", _n.id)
 	fmt.Println("Critical service accessed")
-	n.state = HELD
 
+	// wait for 5 seconds
+	_n.state = HELD
 	time.Sleep(5 * time.Second)
+	_n.state = RELEASED
 
-	n.state = RELEASED
+	log.Printf("%v is releasing the token\n", _n.id)
+	fmt.Println("Releasing token")
 
-	log.Printf("%v is done with the critical service, releasing.\n", n.id)
-	fmt.Println("Done with the critical service")
-
-	n.ReplyQueue()
+	// reply to all queued requests
+	_n.ReplyQueue()
 }
 
-// Requests all other nodes.
-func (n *node) sendRequestToAll() {
-	n.state = REQUESTED
-
-	request := &GroupThree.Request{
-		Id: n.id,
-	}
-
-	n.requests = len(n.clients)
-
-	log.Printf("%v is sending request to all other nodes. Missing %d replies.\n", n.id, n.requests)
-	fmt.Println("Sending request to all other nodes")
-
-	for id, client := range n.clients {
-		_, err := client.Request(n.ctx, request)
-
-		if err != nil {
-			log.Printf("Something went wrong with node: %v, error: %v\n", id, err)
-		}
-	}
-}
-
-// Sends replies to all requests in the queue, then emptied the queue
-func (n *node) ReplyQueue() {
+// This is called when the node releases the token
+func (_n *node) ReplyQueue() {
 	reply := &GroupThree.Reply{}
 
-	for _, id := range n.queue {
-		_, err := n.clients[id].Reply(n.ctx, reply)
+	// reply to all queued requests
+	for _, id := range _n.queue {
+		_, err := _n.clients[id].Reply(_n.ctx, reply)
 
 		if err != nil {
-			log.Printf("Something went wrong with node %v, error: %v\n", id, err)
+			log.Printf("Error replying to %v: %v\n", id, err)
 		}
 	}
-	n.queue = make([]int32, 0)
+	_n.queue = make([]int32, 0)
 }
