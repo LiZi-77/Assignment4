@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package proto;
+
+option go_package = "/proto";
+
+service DistributedMutualExclusion
+{
+    rpc Request(RequestMsg) returns (Info);
+    rpc Reply(RequestMsg) returns (Info);
+}
+
+message RequestMsg {
+    int32 id = 1;
+    uint64 cnt = 2;
+}
+
+message ReplyMsg {
+    int32 id = 1;
+}
+
+
+message Info{}
