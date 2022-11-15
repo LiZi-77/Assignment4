@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	token "github.com/LiZi-77/PCPP-Assignment4/grpc"
+	GroupThree "github.com/LiZi-77/PCPP-Assignment4/grpc"
 	"google.golang.org/grpc"
 )
 
@@ -26,17 +26,17 @@ const (
 
 // node struct.
 type node struct {
-	token.UnimplementedRingServer
+	GroupThree.UnimplementedGroup3Server
+	requests int
 	id       int32 //port
-	clients  map[int32]token.RingClient
+	clients  map[int32]GroupThree.Group3Client
 	ctx      context.Context
 	queue    []int32
 	state    STATE
-	requests int
 }
 
 // request function to request access to the critical service
-func (n *node) RequestAccess(ctx context.Context, req *token.Request) (*token.Ack, error) {
+func (n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThree.Ack, error) {
 	log.Printf("%v recieved a request from %v.\n", n.id, req.Id)
 	fmt.Println("Recieved a request")
 
@@ -48,18 +48,18 @@ func (n *node) RequestAccess(ctx context.Context, req *token.Request) (*token.Ac
 	} else {
 		if n.state == REQUESTED {
 			n.requests++
-			n.clients[req.Id].RequestAccess(ctx, &token.Request{Id: n.id})
+			n.clients[req.Id].Request(ctx, &GroupThree.Request{Id: n.id})
 		}
 		log.Printf("%v is sending a reply to %v\n", n.id, req.Id)
 		fmt.Println("Sending reply")
-		n.clients[req.Id].Reply(ctx, &token.Reply{})
+		n.clients[req.Id].Reply(ctx, &GroupThree.Reply{})
 	}
-	reply := &token.Ack{}
+	reply := &GroupThree.Ack{}
 	return reply, nil
 }
 
 // reply function to check wether all nodes have replied to the request.
-func (n *node) Reply(ctx context.Context, req *token.Reply) (*token.AckReply, error) {
+func (n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.AckReply, error) {
 	n.requests--
 
 	if n.requests == 0 {
@@ -71,7 +71,7 @@ func (n *node) Reply(ctx context.Context, req *token.Reply) (*token.AckReply, er
 	log.Printf("%v recieved a reply. Missing %v replies.\n", n.id, n.requests)
 	fmt.Println("Recieved a reply, waiting for the remaining replies.")
 
-	rep := &token.AckReply{}
+	rep := &GroupThree.AckReply{}
 	return rep, nil
 }
 
@@ -95,7 +95,7 @@ func (n *node) CriticalService() {
 func (n *node) sendRequestToAll() {
 	n.state = REQUESTED
 
-	request := &token.Request{
+	request := &GroupThree.Request{
 		Id: n.id,
 	}
 
@@ -105,7 +105,7 @@ func (n *node) sendRequestToAll() {
 	fmt.Println("Sending request to all other nodes")
 
 	for id, client := range n.clients {
-		_, err := client.RequestAccess(n.ctx, request)
+		_, err := client.Request(n.ctx, request)
 
 		if err != nil {
 			log.Printf("Something went wrong with node: %v, error: %v\n", id, err)
@@ -115,7 +115,7 @@ func (n *node) sendRequestToAll() {
 
 // Sends replies to all requests in the queue, then emptied the queue
 func (n *node) ReplyQueue() {
-	reply := &token.Reply{}
+	reply := &GroupThree.Reply{}
 
 	for _, id := range n.queue {
 		_, err := n.clients[id].Reply(n.ctx, reply)
@@ -145,7 +145,7 @@ func main() {
 	//create a node for this proccess
 	n := &node{
 		id:       port,
-		clients:  make(map[int32]token.RingClient),
+		clients:  make(map[int32]GroupThree.Group3Client),
 		queue:    make([]int32, 0),
 		ctx:      ctx_,
 		state:    RELEASED,
@@ -162,7 +162,7 @@ func main() {
 	fmt.Printf("Node created on port %v\n", n.id)
 
 	grpcServer := grpc.NewServer()
-	token.RegisterRingServer(grpcServer, n)
+	GroupThree.RegisterRingServer(grpcServer, n)
 
 	//serve on the listener
 	go func() {
@@ -189,7 +189,7 @@ func main() {
 
 		defer conn.Close()
 		log.Printf("Succes connecting to: %v\n", nodePort)
-		c := token.NewRingClient(conn)
+		c := GroupThree.NewRingClient(conn)
 		n.clients[nodePort] = c
 	}
 
