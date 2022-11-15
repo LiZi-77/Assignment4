@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	GroupThree "github.com/LiZi-77/PCPP-Assignment4/grpc"
@@ -35,6 +36,7 @@ type node struct {
 	ctx      context.Context
 	queue    []int32
 	state    STATE
+	mutex    *sync.Mutex
 }
 
 func main() {
@@ -151,9 +153,7 @@ func main() {
 			fmt.Printf("Invalid command: %v\n", scanner.Text())
 		}
 	}
-	// log.Printf("%v is requesting access to critical service...\n", _n.id)
-	// fmt.Println("Requesting acccess to the critical service")
-	// _n.sendRequestToAll()
+
 }
 
 // request function to request access to the critical service
@@ -180,20 +180,23 @@ func (n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThre
 }
 
 // reply function to check wether all nodes have replied to the request.
-func (n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.AckReply, error) {
-	n.requests--
+func (_n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.AckReply, error) {
 
-	if n.requests == 0 {
-		log.Printf("%v recieved a reply. All requests has been replied to.\n", n.id)
-		fmt.Println("Recieved reply, all request have been replied to")
-		go n.CriticalService()
+	_n.mutex.Lock()
+	_n.requests--
+
+	if _n.requests == 0 {
+		_n.state = HELD
+		log.Printf("%v is holding the token\n", _n.id)
+		fmt.Println("Holding token")
+	} else {
+		log.Printf("%v is still waiting for %v replies\n", _n.id, _n.requests)
+		fmt.Println("Waiting for replies")
 	}
+	_n.mutex.Unlock()
 
-	log.Printf("%v recieved a reply. Missing %v replies.\n", n.id, n.requests)
-	fmt.Println("Recieved a reply, waiting for the remaining replies.")
-
-	rep := &GroupThree.AckReply{}
-	return rep, nil
+	reply := &GroupThree.AckReply{}
+	return reply, nil
 }
 
 // critical service emulated in this method. takes 5 seconds to exec
