@@ -1,13 +1,21 @@
 syntax = "proto3";
 
+option go_package = "https://github.com/LiZi-77/Assignment4/grpc";
+
 package proto;
 
-option go_package = "/grpc";
+// compile command:
+// protoc --go_out=. --go_opt=paths=source_relative --go-grpc_out=. --go-grpc_opt=paths=source_relative grpc/interface.proto
 
-service GroupThree
+// Problems :
+// protoc-gen-go: program not found or is not executable
+// terminal :   export GOPATH=$HOME/go
+//              export PATH=$PATH:$GOPATH/bin
+
+service Ping
 {
-    rpc Request(Request) returns (Ack) {};
-    rpc Reply(Reques) returns (AckReply) {};
+    rpc AccessRequest(Request) returns (Ack) {};
+    rpc AccessReply(Reply) returns (AckReply) {};
 }
 
 message Request {

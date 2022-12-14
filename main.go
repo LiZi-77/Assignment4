@@ -8,13 +8,18 @@ import (
 	"log"
 	"net"
 	"os"
-	"strconv"
-	"sync"
-	"time"
 
-	GroupThree "github.com/LiZi-77/PCPP-Assignment4/grpc"
+	gRPC "github.com/LiZi-77/PCPP-Assignment4/grpc"
 	"google.golang.org/grpc"
 )
+
+// problem: no go mod
+// go mod init Assignment4
+// go get google.golang.org/grpc
+
+
+
+var port = flag.Int("port", 5000, "port") //port for the node default 5000
 
 const INITPORT int32 = 8000
 
@@ -26,195 +31,156 @@ const (
 	REQUESTED
 )
 
-type node struct {
-	GroupThree.UnimplementedGroup3Server
-	requests int
-	id       int32 //port
-	clients  map[int32]GroupThree.Group3Client
-	ctx      context.Context
-	queue    []int32
-	state    STATE
-	mutex    *sync.Mutex
+type peer struct {
+	gRPC.UnimplementedPingServer
+	id            	int32
+	clients       	map[int32]gRPC.PingClient
+	ctx           	context.Context
+	state			STATE
+	requests		int32 // the number of requests sent by this node
+	queue    		[]int32
 }
 
 func main() {
-	arg1, _ := strconv.ParseInt(os.Args[1], 10, 32)
-	var port = int32(arg1) + INITPORT
+	f := setLog() //uncomment this line to log to a log.txt file instead of the console
+	defer f.Close()
 
-	logfile, err := os.OpenFile("log.server", os.O_APPEND|os.O_CREATE|os.O_RDWR, 0644)
-
-	if err != nil {
-		log.Fatalf("failed opening file: %s", err)
-	}
-	defer logfile.Close()
-	log.SetOutput(logfile)
-
-	flag.Parse() //parse the flags
+	flag.Parse() //go run client.go -port to set the port of this peer
 
 	ctx_, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	//create a new node
-	_n := &node{
-		id:       port,
-		clients:  make(map[int32]GroupThree.Group3Client),
-		queue:    make([]int32, 0),
+	var ownPort = int32(*port)
+
+	//create a node for this proccess
+	p := &peer{
+		id:       ownPort,
+		clients:  make(map[int32]gRPC.RingClient),
 		ctx:      ctx_,
-		state:    RELEASED,
+		state:    RELEASED,	// initial state is RELEASED
 		requests: 0,
 	}
 
-	list, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+	//creates listener on port 
+	list, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		log.Fatalf("Failed to listen on port: %v\n", err)
 	}
-	log.Printf("Listening on port: %v\n", port)
-	fmt.Println("Listening on port: ", port)
 
-	// Create a new gRPC server
-	_s := grpc.NewServer()
-	GroupThree.RegisterGroup3Server(_s, _n)
+	log.Printf("Node created on port: %d\n", p.id)
+	fmt.Printf("Node created on port %v\n", p.id)
 
+	grpcServer := grpc.NewServer()
+	gRPC.RegisterRingServer(grpcServer, p)
+
+	//serve on the listener
 	go func() {
-		if err := _s.Serve(list); err != nil {
+		if err := grpcServer.Serve(list); err != nil {
 			log.Fatalf("failed to server %v\n", err)
 		}
 	}()
+	
+	//for loop to dial all other nodes in the network, if this loop is increased the number of nodes in the network is aswell
+	for i := 0; i < 3; i++ {
+		nodePort := int32(5000 + i)
 
-	//connect to all other nodes
-	for i := 0; i < 4; i++ {
-		nPort := int32(i) + INITPORT
-
-		if nPort == _n.id {
+		if nodePort == p.id {
 			continue
 		}
 
 		var conn *grpc.ClientConn
+		log.Printf("Trying to dial: %v\n", nodePort)
+		conn, err := grpc.Dial(fmt.Sprintf(":%v", nodePort), grpc.WithInsecure(), grpc.WithBlock())
 
-		log.Printf("Dialing %v\n", nPort)
-		fmt.Println("Dialing ", nPort)
-
-		conn, err := grpc.Dial(fmt.Sprintf(":%v", nPort), grpc.WithInsecure(), grpc.WithBlock())
 		if err != nil {
-			log.Fatalf("Dial failed %v\n", err)
+			log.Fatalf("Could not connect: %v\n", err)
 		}
 
 		defer conn.Close()
-		log.Printf("Succes connecting to: %v\n", nPort)
-		fmt.Println("Succes connecting to: ", nPort)
+		log.Printf("Succes connecting to: %v\n", nodePort)
+		client := gRPC.NewRingClient(conn)
+		p.clients[nodePort] = client
 
-		//create a new client
-		_c := GroupThree.NewGroup3Client(conn)
-		_n.clients[nPort] = _c
+		log.Printf("peer %v is connected to peer %v \n", p.id, nodePort)
+		fmt.Printf("peer %v is connected to peer %v \n", p.id, nodePort)
 	}
 
-	log.Printf("%v is connected to %v other nodes\n", _n.id, len(_n.clients))
-	fmt.Printf("%v is connected to %v other nodes\n", _n.id, len(_n.clients))
+	p.systemStart()
+	// read the input from current node 
+}
 
-	// wait for user input
+func (p *peer) systemStart() {
+	println("3 peers system starts now.")
+
 	scanner := bufio.NewScanner(os.Stdin)
+	println("Welcome to the 3 peer system!\n Please input 1 if you want to do the critical section.")
 
-	for scanner.Scan() {
-		if scanner.Text() == "request" {
-			if _n.state == RELEASED {
-				_n.state = REQUESTED
-				_n.requests++
-				log.Printf("Node %v is requesting the token\n", _n.id)
-				fmt.Printf("Node %v is requesting the token\n", _n.id)
+	for {
+		scanner.Scan()
+		text := scanner.Text()
 
-				for _, client := range _n.clients {
-					go func(client GroupThree.Group3Client) {
-						_, err := client.RequestToken(_n.ctx, &GroupThree.RequestTokenRequest{
-							Id: _n.id,
-						})
-						if err != nil {
-							log.Printf("Error requesting token: %v\n", err)
-						}
-					}(client)
-				}
-			} else {
-				log.Printf("Node %v is already holding the token\n", _n.id)
-				fmt.Printf("Node %v is already holding the token\n", _n.id)
-			}
+		if text == "1" {
+			//sendRequest to all peers
+			log.Println("%v want to get the critical section.", p.id)
+			p.sendRequestToAllPeers()
 		} else {
-			log.Printf("Invalid command: %v\n", scanner.Text())
-			fmt.Printf("Invalid command: %v\n", scanner.Text())
+			println("Please input 1 if you want to do the critical section. \n Other inputs are illegal.")
 		}
 	}
-
 }
 
-// request function to request access to the critical service
-func (_n *node) Request(ctx context.Context, req *GroupThree.Request) (*GroupThree.Ack, error) {
-	log.Printf("%v recieved a request from %v.\n", _n.id, req.Id)
-	fmt.Println("Recieved a request")
+func (p *peer) sendRequestToAllPeers() {
+	// [peerId] sends requests to all peers to get permission
+	p.state = REQUESTED 	// change p's state to REQUESTED
 
-	//checks if state is higher, if equal check id. (This is the hierarchy)
-	if _n.state == HELD || (n.state == REQUESTED && (_n.id > req.Id)) {
-		log.Printf("%v is queueing a request from %v\n", _n.id, req.Id)
-		fmt.Println("Queueing request")
-		_n.queue = append(n.queue, req.Id)
-	} else {
-		if _n.state == REQUESTED {
-			_n.requests++
-			_n.clients[req.Id].Request(ctx, &GroupThree.Request{Id: _n.id})
-		}
-		log.Printf("%v is sending a reply to %v\n", _n.id, req.Id)
-		fmt.Println("Sending reply")
-		_n.clients[req.Id].Reply(ctx, &GroupThree.Reply{})
+	request := gRPC.Request{
+		Id: p.id,	// this field clarify which peer sent this request
 	}
-	reply := &GroupThree.Ack{}
-	return reply, nil
-}
 
-// reply function to reply to a request
-func (_n *node) Reply(ctx context.Context, req *GroupThree.Reply) (*GroupThree.AckReply, error) {
+	log.Printf("%v is sending request to all other nodes. Missing %d replies.\n", p.id, p.requests)
+	fmt.Println("Sending request to all other nodes")
 
-	_n.mutex.Lock()
-	_n.requests--
-
-	if _n.requests == 0 {
-		_n.state = HELD
-		log.Printf("%v is holding the token\n", _n.id)
-		fmt.Println("Holding token")
-	} else {
-		log.Printf("%v is still waiting for %v replies\n", _n.id, _n.requests)
-		fmt.Println("Waiting for replies")
-	}
-	_n.mutex.Unlock()
-
-	reply := &GroupThree.AckReply{}
-	return reply, nil
-}
-
-// critical function to simulate a critical service
-func (_n *node) CriticalService() {
-	log.Printf("%v is in the critical service\n", _n.id)
-	fmt.Println("Critical service accessed")
-
-	// wait for 5 seconds
-	_n.state = HELD
-	time.Sleep(5 * time.Second)
-	_n.state = RELEASED
-
-	log.Printf("%v is releasing the token\n", _n.id)
-	fmt.Println("Releasing token")
-
-	// reply to all queued requests
-	_n.ReplyQueue()
-}
-
-// This is called when the node releases the token
-func (_n *node) ReplyQueue() {
-	reply := &GroupThree.Reply{}
-
-	// reply to all queued requests
-	for _, id := range _n.queue {
-		_, err := _n.clients[id].Reply(_n.ctx, reply)
+	//send request to all clients in the clients map
+	for id, client := range p.clients {
+		_, err := client.AccessRequest(p.ctx, request)
 
 		if err != nil {
-			log.Printf("Error replying to %v: %v\n", id, err)
+			log.Printf("Can't send access request to peer: %v, error: %v\n", id, err)
 		}
 	}
-	_n.queue = make([]int32, 0)
 }
+
+func (p *peer)AccessRequest(ctx context.Context, req *gRPC.Request) (*gRPC.Ack, error) {
+	log.Printf("peer %v recieved a request from peer %v.\n", p.id, req.Id)
+	fmt.Println("Recieved a request")
+
+	// We order the hierachy by the peer id which means 5000 has a higher rannk
+	if p.state == HELD || (p.state == REQUESTED && (p.id < req.Id)) {
+		log.Printf("%v is queueing a request from %v\n", p.id, req.Id)
+		fmt.Println("Queueing request")
+		p.queue = append(p.queue, req.Id)
+	} else {
+		if p.state == REQUESTED {
+			p.requests++
+			p.clients[req.Id].RequestAccess(ctx, &gRPC.Request{Id: p.id})
+		}
+		log.Printf("%v is sending a reply to %v\n", p.id, req.Id)
+		fmt.Println("Sending reply")
+		p.clients[req.Id].Reply(ctx, &gRPC.Reply{})
+	}
+	reply := &gRPC.Ack{}
+	return reply, nil
+}
+
+// sets the logger to use a log.txt file instead of the console
+func setLog() *os.File {
+
+	// This connects to the log file/changes the output of the log informaiton to the log.txt file.
+	f, err := os.OpenFile("log.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
+	}
+	log.SetOutput(f)
+	return f
+}
+
