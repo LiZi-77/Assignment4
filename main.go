@@ -17,11 +17,9 @@ import (
 // go mod init Assignment4
 // go get google.golang.org/grpc
 
+var port = flag.Int("port", 8000, "port") //port for the node default 8000
 
-
-var port = flag.Int("port", 5000, "port") //port for the node default 5000
-
-const INITPORT int32 = 8000
+// const INITPORT int32 = 8000
 
 type STATE int32 //state of the node
 
@@ -33,12 +31,12 @@ const (
 
 type peer struct {
 	gRPC.UnimplementedPingServer
-	id            	int32
-	clients       	map[int32]gRPC.PingClient
-	ctx           	context.Context
-	state			STATE
-	requests		int32 // the number of requests sent by this node
-	queue    		[]int32
+	id       int32
+	clients  map[int32]gRPC.PingClient
+	ctx      context.Context
+	state    STATE
+	requests int32 // the number of requests sent by this node
+	queue    []int32
 }
 
 func main() {
@@ -57,11 +55,11 @@ func main() {
 		id:       ownPort,
 		clients:  make(map[int32]gRPC.RingClient),
 		ctx:      ctx_,
-		state:    RELEASED,	// initial state is RELEASED
+		state:    RELEASED, // initial state is RELEASED
 		requests: 0,
 	}
 
-	//creates listener on port 
+	//creates listener on port
 	list, err := net.Listen("tcp", fmt.Sprintf(":%v", port))
 	if err != nil {
 		log.Fatalf("Failed to listen on port: %v\n", err)
@@ -79,10 +77,10 @@ func main() {
 			log.Fatalf("failed to server %v\n", err)
 		}
 	}()
-	
+
 	//for loop to dial all other nodes in the network, if this loop is increased the number of nodes in the network is aswell
-	for i := 0; i < 3; i++ {
-		nodePort := int32(5000 + i)
+	for i := 0; i < 4; i++ {
+		nodePort := int32(8000 + i)
 
 		if nodePort == p.id {
 			continue
@@ -106,14 +104,17 @@ func main() {
 	}
 
 	p.systemStart()
-	// read the input from current node 
+
 }
 
+// systemStart starts the system
 func (p *peer) systemStart() {
-	println("3 peers system starts now.")
+	println("4 peers system starts now.")
 
+	// read the input from current node
+	// if input == 1, send request to all peers
 	scanner := bufio.NewScanner(os.Stdin)
-	println("Welcome to the 3 peer system!\n Please input 1 if you want to do the critical section.")
+	println("Welcome to the 4 peer system!\n Please input 1 if you want to do the critical section.")
 
 	for {
 		scanner.Scan()
@@ -129,12 +130,13 @@ func (p *peer) systemStart() {
 	}
 }
 
+// sendRequestToAllPeers sends a request to all peers to get permission to enter the critical section
 func (p *peer) sendRequestToAllPeers() {
 	// [peerId] sends requests to all peers to get permission
-	p.state = REQUESTED 	// change p's state to REQUESTED
+	p.state = REQUESTED // change p's state to REQUESTED
 
 	request := gRPC.Request{
-		Id: p.id,	// this field clarify which peer sent this request
+		Id: p.id, // this field clarify which peer sent this request
 	}
 
 	log.Printf("%v is sending request to all other nodes. Missing %d replies.\n", p.id, p.requests)
@@ -150,11 +152,12 @@ func (p *peer) sendRequestToAllPeers() {
 	}
 }
 
-func (p *peer)AccessRequest(ctx context.Context, req *gRPC.Request) (*gRPC.Ack, error) {
+// AccessRequest is called by other peers to request access to the critical section
+func (p *peer) AccessRequest(ctx context.Context, req *gRPC.Request) (*gRPC.Ack, error) {
 	log.Printf("peer %v recieved a request from peer %v.\n", p.id, req.Id)
 	fmt.Println("Recieved a request")
 
-	// We order the hierachy by the peer id which means 5000 has a higher rannk
+	// We order the hierachy by the peer id which means 8000 has a higher rannk
 	if p.state == HELD || (p.state == REQUESTED && (p.id < req.Id)) {
 		log.Printf("%v is queueing a request from %v\n", p.id, req.Id)
 		fmt.Println("Queueing request")
@@ -183,4 +186,3 @@ func setLog() *os.File {
 	log.SetOutput(f)
 	return f
 }
-
